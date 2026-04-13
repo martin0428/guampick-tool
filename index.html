@@ -107,6 +107,7 @@
   .import-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text2); margin-bottom: 8px; }
   .step-num { background: var(--success); color: #fff; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
   .import-note { font-size: 11px; color: var(--text3); }
+  .dup-badge { font-size: 11px; background: #FFF0E8; color: var(--accent); padding: 2px 8px; border-radius: 4px; margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -170,8 +171,11 @@ const CAT_COLORS = {
 
 let apiKey = localStorage.getItem('guampick_api_key') || '';
 let products = [], results = [], headers = [], rawRows = [];
+// ★ 중복 제거: Handle 기준으로 대표 row 인덱스 저장
+let handleToRowIndex = {};
 let running = false, done = false;
 let filter = '전체', onlyMod = false, tab = 'type';
+let totalDuplicates = 0;
 
 if (apiKey) {
   document.getElementById('apiKeyInput').value = apiKey;
@@ -201,7 +205,7 @@ document.getElementById('fileInput').addEventListener('change', e => { const f =
 
 async function parseFile(file) {
   showError('');
-  products = []; results = []; done = false;
+  products = []; results = []; done = false; handleToRowIndex = {}; totalDuplicates = 0;
   document.getElementById('dropContent').innerHTML = `
     <div class="file-loaded">
       <span style="font-size:36px">${file.name.endsWith('.zip') ? '🗜️' : '📄'}</span>
@@ -225,16 +229,35 @@ async function parseFile(file) {
   Papa.parse(csvText, {
     complete: ({ data: rows }) => {
       headers = rows[0];
-      rawRows = rows.slice(1);
-      const ti = headers.indexOf('Title'), yi = headers.indexOf('Type');
-      const ii = headers.indexOf('Image Src'), hi = headers.indexOf('Handle');
+      rawRows = rows.slice(1).filter(r => r.some(c => c.trim() !== ''));
+      const ti = headers.indexOf('Title');
+      const yi = headers.indexOf('Type');
+      const ii = headers.indexOf('Image Src');
+      const hi = headers.indexOf('Handle');
+
       const seen = new Set();
       products = [];
-      rows.slice(1).forEach(r => {
+
+      rawRows.forEach((r, idx) => {
         const h = r[hi];
-        if (h && !seen.has(h)) { seen.add(h); products.push({ handle: h, title: r[ti] || '', image: r[ii] || '', originalType: r[yi] || '' }); }
+        if (!h) return;
+        if (!seen.has(h)) {
+          seen.add(h);
+          // ★ 대표 row 인덱스 저장 (Handle의 첫 번째 등장 row)
+          handleToRowIndex[h] = idx;
+          products.push({
+            handle: h,
+            title: r[ti] || '',
+            image: r[ii] || '',
+            originalType: r[yi] || ''
+          });
+        } else {
+          // ★ 중복 row 카운트
+          totalDuplicates++;
+        }
       });
-      document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨`;
+
+      document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨${totalDuplicates > 0 ? ` (중복 행 ${totalDuplicates}개 제외)` : ''}`;
       renderPreview();
       renderAction();
     },
@@ -243,21 +266,30 @@ async function parseFile(file) {
 }
 
 function renderPreview() {
-  const skincare = products.filter(p => p.originalType === 'life' || p.originalType === '').length;
+  const suspicious = products.filter(p => p.originalType === 'life' || p.originalType === '').length;
   const hasImg = products.filter(p => p.image).length;
   document.getElementById('previewSection').style.display = '';
   document.getElementById('previewSection').innerHTML = `
     <div class="preview-grid">
-      <div class="preview-item"><span class="preview-num" style="color:var(--text)">${products.length}</span><span class="preview-label">총 상품</span></div>
+      <div class="preview-item">
+        <span class="preview-num" style="color:var(--text)">${products.length}</span>
+        <span class="preview-label">총 상품${totalDuplicates > 0 ? `\n(중복 ${totalDuplicates}행 제거됨)` : ''}</span>
+      </div>
       <div class="preview-divider"></div>
-      <div class="preview-item"><span class="preview-num" style="color:var(--danger)">${skincare}</span><span class="preview-label">오분류 의심\n(life 타입)</span></div>
+      <div class="preview-item">
+        <span class="preview-num" style="color:var(--danger)">${suspicious}</span>
+        <span class="preview-label">오분류 의심\n(life 타입)</span>
+      </div>
       <div class="preview-divider"></div>
-      <div class="preview-item"><span class="preview-num" style="color:#27AE60">${hasImg}</span><span class="preview-label">이미지 있음</span></div>
+      <div class="preview-item">
+        <span class="preview-num" style="color:#27AE60">${hasImg}</span>
+        <span class="preview-label">이미지 있음</span>
+      </div>
     </div>
     <div class="info-box">
       <div class="info-row"><span>🔄</span><div><strong>Type 재분류</strong> — 35개 카테고리로 정확하게 분류</div></div>
       <div class="info-row"><span>🌐</span><div><strong>영문 번역</strong> — 브랜드명 유지, 자연스러운 영문으로</div></div>
-      <div class="info-row"><span>📝</span><div><strong>영문 상세설명 생성</strong> — 2-3문장, 기존 상세페이지 맨 위에 추가</div></div>
+      <div class="info-row"><span>📝</span><div><strong>영문 상세설명 생성</strong> — 2-3문장, 한글 상세페이지 아래에 추가</div></div>
     </div>`;
 }
 
@@ -284,7 +316,13 @@ async function startProcessing() {
     settled.forEach((r, j) => {
       const p = chunk[j];
       if (r.status === 'fulfilled') {
-        results.push({ ...p, newType: r.value.type || p.originalType, titleEn: r.value.title_en || p.title, description: r.value.description || '', confidence: r.value.confidence || 0 });
+        results.push({
+          ...p,
+          newType: r.value.type || p.originalType,
+          titleEn: r.value.title_en || p.title,
+          description: r.value.description || '',
+          confidence: r.value.confidence || 0
+        });
       } else {
         results.push({ ...p, newType: p.originalType, titleEn: p.title, description: '', confidence: 0, error: true });
       }
@@ -424,23 +462,55 @@ function toggleMod(v) { onlyMod = v; renderResults(); }
 function downloadCSV() {
   const byHandle = {};
   results.forEach(r => { byHandle[r.handle] = r; });
-  const ti = headers.indexOf('Title'), yi = headers.indexOf('Type'), bi = headers.indexOf('Body (HTML)');
-  const updated = rawRows.map(row => {
-    const r = byHandle[row[0]];
-    if (!r) return row;
+
+  const ti = headers.indexOf('Title');
+  const yi = headers.indexOf('Type');
+  const bi = headers.indexOf('Body (HTML)');
+
+  // ★ 중복 제거: Handle당 첫 번째 row만 포함, 나머지 variant rows(Handle 없는 행)도 그대로 유지
+  const seenHandles = new Set();
+  const updatedRows = [];
+
+  rawRows.forEach(row => {
+    const handle = row[headers.indexOf('Handle')];
+
+    // Handle이 없는 행 = variant row → 그대로 포함 (옵션/이미지 추가 행)
+    if (!handle) {
+      updatedRows.push(row);
+      return;
+    }
+
+    // Handle이 있고 이미 처리한 경우 → 중복 제거 (건너뜀)
+    if (seenHandles.has(handle)) return;
+    seenHandles.add(handle);
+
+    const r = byHandle[handle];
+    if (!r) { updatedRows.push(row); return; }
+
     const nr = [...row];
     nr[ti] = r.titleEn;
     nr[yi] = r.newType;
+
+    // ★ 영문 설명을 기존 한글 Body HTML 뒤에 추가 (옵션 D)
     if (bi >= 0 && r.description) {
-      const dh = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-radius:8px;margin-bottom:20px;">${r.description}</div>`;
-      nr[bi] = dh + (nr[bi] || '');
+      const descHtml = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-left:4px solid #FF5C2B;border-radius:0 8px 8px 0;margin-top:20px;">${r.description}</div>`;
+      nr[bi] = (nr[bi] || '') + descHtml;
     }
-    return nr;
+
+    updatedRows.push(nr);
   });
-  const csv = [headers, ...updated].map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+
+  const csv = [headers, ...updatedRows]
+    .map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
+    .join('\n');
+
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a'); a.href = url; a.download = 'guampick_updated.csv'; a.click(); URL.revokeObjectURL(url);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'guampick_updated.csv';
+  a.click();
+  URL.revokeObjectURL(url);
 }
 
 function showError(msg) {
