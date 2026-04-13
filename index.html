@@ -33,6 +33,9 @@
   .api-input:focus { border-color: var(--accent); }
   .btn-dark { padding: 10px 20px; background: var(--text); color: #fff; border: none; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
   .btn-dark:hover { background: #333; }
+  .btn-retry { padding: 10px 20px; background: var(--danger); color: #fff; border: none; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
+  .btn-retry:hover { background: #a93226; }
+  .btn-retry:disabled { background: #ccc; cursor: not-allowed; }
   .api-hint { font-size: 11px; color: var(--text3); margin-top: 8px; }
   .api-hint a { color: var(--accent); text-decoration: none; }
   .api-status { font-size: 12px; margin-top: 6px; }
@@ -64,13 +67,15 @@
   .progress-bar { height: 100%; background: var(--accent); border-radius: 10px; transition: width 0.4s ease; }
   .progress-pct { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 40px; }
   .summary-card { background: var(--surface); border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 16px; border: 1px solid var(--border); }
-  .summary-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .summary-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
   .summary-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; }
+  .summary-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .chips { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .chip { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
   .chip-orange { background: #FFF0E8; color: var(--accent); }
   .chip-blue { background: #E8F0FF; color: #2563EB; }
   .chip-red { background: var(--danger-bg); color: var(--danger); }
+  .chip-green { background: var(--success-bg); color: var(--success); }
   .cat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
   .cat-card { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: background 0.15s; }
   .cat-card:hover { background: var(--surface2); }
@@ -92,6 +97,7 @@
   td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
   tr:last-child td { border-bottom: none; }
   tr.modified { background: #FFFDF5; }
+  tr.failed { background: var(--danger-bg); }
   .pill { font-size: 10px; font-weight: 700; color: #fff; padding: 3px 9px; border-radius: 20px; white-space: nowrap; display: inline-block; }
   .type-old { font-size: 11px; color: var(--text3); background: var(--surface2); padding: 2px 8px; border-radius: 4px; }
   .type-old.changed { color: var(--danger); background: var(--danger-bg); }
@@ -107,7 +113,6 @@
   .import-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text2); margin-bottom: 8px; }
   .step-num { background: var(--success); color: #fff; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
   .import-note { font-size: 11px; color: var(--text3); }
-  .dup-badge { font-size: 11px; background: #FFF0E8; color: var(--accent); padding: 2px 8px; border-radius: 4px; margin-left: 6px; }
 </style>
 </head>
 <body>
@@ -171,7 +176,6 @@ const CAT_COLORS = {
 
 let apiKey = localStorage.getItem('guampick_api_key') || '';
 let products = [], results = [], headers = [], rawRows = [];
-// ★ 중복 제거: Handle 기준으로 대표 row 인덱스 저장
 let handleToRowIndex = {};
 let running = false, done = false;
 let filter = '전체', onlyMod = false, tab = 'type';
@@ -243,16 +247,9 @@ async function parseFile(file) {
         if (!h) return;
         if (!seen.has(h)) {
           seen.add(h);
-          // ★ 대표 row 인덱스 저장 (Handle의 첫 번째 등장 row)
           handleToRowIndex[h] = idx;
-          products.push({
-            handle: h,
-            title: r[ti] || '',
-            image: r[ii] || '',
-            originalType: r[yi] || ''
-          });
+          products.push({ handle: h, title: r[ti] || '', image: r[ii] || '', originalType: r[yi] || '' });
         } else {
-          // ★ 중복 row 카운트
           totalDuplicates++;
         }
       });
@@ -296,42 +293,66 @@ function renderPreview() {
 function renderAction() {
   document.getElementById('actionSection').style.display = '';
   document.getElementById('actionSection').innerHTML = `
-    <button class="run-btn" id="runBtn" onclick="startProcessing()">
+    <button class="run-btn" id="runBtn" onclick="startProcessing(false)">
       🤖 재분류 + 번역 + 설명 시작 (${products.length}개)
     </button>`;
 }
 
-async function startProcessing() {
+// ★ 메인 처리: 5개씩 3초 간격
+async function startProcessing(retryOnly) {
   if (!apiKey) { showError('먼저 API 키를 저장해주세요!'); return; }
   if (running) return;
-  running = true; done = false; results = [];
-  document.getElementById('runBtn').disabled = true;
-  document.getElementById('progressSection').style.display = '';
-  document.getElementById('resultsSection').style.display = '';
-  document.getElementById('failureWarning').style.display = 'none';
+  running = true;
 
-  for (let i = 0; i < products.length; i += 2) {
-    const chunk = products.slice(i, i + 2);
+  const targets = retryOnly
+    ? results.filter(r => r.error).map(r => ({ ...r }))
+    : products;
+
+  if (!retryOnly) {
+    done = false;
+    results = [];
+    document.getElementById('progressSection').style.display = '';
+    document.getElementById('resultsSection').style.display = '';
+  }
+
+  document.getElementById('failureWarning').style.display = 'none';
+  const runBtn = document.getElementById('runBtn');
+  const retryBtn = document.getElementById('retryBtn');
+  if (runBtn) runBtn.disabled = true;
+  if (retryBtn) retryBtn.disabled = true;
+
+  const BATCH = 5;
+
+  for (let i = 0; i < targets.length; i += BATCH) {
+    const chunk = targets.slice(i, i + BATCH);
     const settled = await Promise.allSettled(chunk.map(p => processProduct(p.title)));
+
     settled.forEach((r, j) => {
       const p = chunk[j];
-      if (r.status === 'fulfilled') {
-        results.push({
-          ...p,
-          newType: r.value.type || p.originalType,
-          titleEn: r.value.title_en || p.title,
-          description: r.value.description || '',
-          confidence: r.value.confidence || 0
-        });
+      const result = {
+        ...p,
+        newType: r.status === 'fulfilled' ? (r.value.type || p.originalType) : p.originalType,
+        titleEn: r.status === 'fulfilled' ? (r.value.title_en || p.title) : p.title,
+        description: r.status === 'fulfilled' ? (r.value.description || '') : '',
+        confidence: r.status === 'fulfilled' ? (r.value.confidence || 0) : 0,
+        error: r.status === 'rejected'
+      };
+
+      if (retryOnly) {
+        const idx = results.findIndex(x => x.handle === p.handle);
+        if (idx >= 0) results[idx] = result;
       } else {
-        results.push({ ...p, newType: p.originalType, titleEn: p.title, description: '', confidence: 0, error: true });
+        results.push(result);
       }
     });
-    updateProgress(Math.min(i + 2, products.length));
+
+    if (!retryOnly) updateProgress(Math.min(i + BATCH, targets.length), targets.length);
     renderResults();
-    await new Promise(r => setTimeout(r, 2000));
+    if (i + BATCH < targets.length) await new Promise(r => setTimeout(r, 3000));
   }
-  running = false; done = true;
+
+  running = false;
+  done = true;
   renderResults();
 }
 
@@ -346,8 +367,8 @@ async function processProduct(title) {
   return data;
 }
 
-function updateProgress(current) {
-  const pct = Math.round((current / products.length) * 100);
+function updateProgress(current, total) {
+  const pct = Math.round((current / total) * 100);
   document.getElementById('progressSection').innerHTML = `
     <div class="progress-row">
       <div class="progress-track"><div class="progress-bar" style="width:${pct}%"></div></div>
@@ -361,9 +382,11 @@ function renderResults() {
   const descAdded = results.filter(r => r.description).length;
   const errors = results.filter(r => r.error).length;
 
-  if (errors > 0) {
+  if (errors > 0 && done) {
     document.getElementById('failureWarning').style.display = '';
-    document.getElementById('failureWarning').textContent = `⚠ ${errors}개 처리 실패 — API 키를 확인해주세요`;
+    document.getElementById('failureWarning').textContent = `⚠ ${errors}개 처리 실패 — 아래 "실패 재시도" 버튼을 눌러주세요`;
+  } else {
+    document.getElementById('failureWarning').style.display = 'none';
   }
 
   const displayed = results
@@ -372,7 +395,6 @@ function renderResults() {
 
   const typeKeys = ['전체', ...Object.keys(typeCounts).sort()];
 
-  document.getElementById('resultsSection').style.display = '';
   document.getElementById('resultsSection').innerHTML = `
     <div class="summary-card">
       <div class="summary-header">
@@ -381,10 +403,14 @@ function renderResults() {
           ${done ? `<div class="chips">
             <span class="chip chip-orange">Type ${typeChanged}개 변경</span>
             <span class="chip chip-blue">설명 ${descAdded}개 생성</span>
-            ${errors > 0 ? `<span class="chip chip-red">실패 ${errors}개</span>` : ''}
+            ${errors > 0 ? `<span class="chip chip-red">실패 ${errors}개</span>` : '<span class="chip chip-green">실패 없음 ✓</span>'}
           </div>` : ''}
         </div>
-        ${done ? `<button class="btn-dark" onclick="downloadCSV()">⬇ CSV 다운로드</button>` : ''}
+        ${done ? `
+          <div style="display:flex;gap:8px;flex-wrap:wrap;">
+            ${errors > 0 ? `<button class="btn-retry" id="retryBtn" onclick="startProcessing(true)">🔄 실패 ${errors}개 재시도</button>` : ''}
+            <button class="btn-dark" onclick="downloadCSV()">⬇ CSV 다운로드</button>
+          </div>` : ''}
       </div>
       <div class="cat-grid">
         ${Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, cnt]) => `
@@ -421,9 +447,12 @@ function renderResults() {
             const tc = r.newType !== r.originalType;
             const conf = Math.round((r.confidence || 0) * 100);
             const confColor = r.confidence > 0.85 ? '#27AE60' : r.confidence > 0.6 ? '#F39C12' : '#E74C3C';
-            return `<tr class="${tc ? 'modified' : ''}">
+            return `<tr class="${r.error ? 'failed' : tc ? 'modified' : ''}">
               <td style="color:var(--text3);font-size:11px;">${i + 1}</td>
-              <td style="max-width:200px;"><span style="font-size:12px;color:var(--text2);">${r.title}</span>${r.error ? '<span style="font-size:10px;color:var(--danger);display:block;">실패</span>' : ''}</td>
+              <td style="max-width:200px;">
+                <span style="font-size:12px;color:var(--text2);">${r.title}</span>
+                ${r.error ? '<span style="font-size:10px;color:var(--danger);display:block;font-weight:600;">⚠ 실패</span>' : ''}
+              </td>
               ${tab === 'type' ? `
                 <td><span class="type-old ${tc ? 'changed' : ''}">${r.originalType || '—'}</span></td>
                 <td><span class="pill" style="background:${CAT_COLORS[r.newType] || '#999'}">${r.newType}</span>${tc ? '<span class="check-mark">✓</span>' : ''}</td>` :
@@ -434,7 +463,7 @@ function renderResults() {
               <td>
                 <div class="conf-bar-wrap">
                   <div class="conf-track"><div class="conf-fill" style="width:${conf}%;background:${confColor}"></div></div>
-                  <span class="conf-num">${conf}%</span>
+                  <span class="conf-num">${r.error ? '—' : conf + '%'}</span>
                 </div>
               </td>
             </tr>`;
@@ -467,20 +496,12 @@ function downloadCSV() {
   const yi = headers.indexOf('Type');
   const bi = headers.indexOf('Body (HTML)');
 
-  // ★ 중복 제거: Handle당 첫 번째 row만 포함, 나머지 variant rows(Handle 없는 행)도 그대로 유지
   const seenHandles = new Set();
   const updatedRows = [];
 
   rawRows.forEach(row => {
     const handle = row[headers.indexOf('Handle')];
-
-    // Handle이 없는 행 = variant row → 그대로 포함 (옵션/이미지 추가 행)
-    if (!handle) {
-      updatedRows.push(row);
-      return;
-    }
-
-    // Handle이 있고 이미 처리한 경우 → 중복 제거 (건너뜀)
+    if (!handle) { updatedRows.push(row); return; }
     if (seenHandles.has(handle)) return;
     seenHandles.add(handle);
 
@@ -491,7 +512,6 @@ function downloadCSV() {
     nr[ti] = r.titleEn;
     nr[yi] = r.newType;
 
-    // ★ 영문 설명을 기존 한글 Body HTML 뒤에 추가 (옵션 D)
     if (bi >= 0 && r.description) {
       const descHtml = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-left:4px solid #FF5C2B;border-radius:0 8px 8px 0;margin-top:20px;">${r.description}</div>`;
       nr[bi] = (nr[bi] || '') + descHtml;
