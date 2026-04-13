@@ -69,7 +69,6 @@
   .summary-card { background: var(--surface); border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 16px; border: 1px solid var(--border); }
   .summary-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 10px; }
   .summary-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; }
-  .summary-actions { display: flex; gap: 8px; flex-wrap: wrap; }
   .chips { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
   .chip { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
   .chip-orange { background: #FFF0E8; color: var(--accent); }
@@ -238,10 +237,8 @@ async function parseFile(file) {
       const yi = headers.indexOf('Type');
       const ii = headers.indexOf('Image Src');
       const hi = headers.indexOf('Handle');
-
       const seen = new Set();
       products = [];
-
       rawRows.forEach((r, idx) => {
         const h = r[hi];
         if (!h) return;
@@ -253,7 +250,6 @@ async function parseFile(file) {
           totalDuplicates++;
         }
       });
-
       document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨${totalDuplicates > 0 ? ` (중복 행 ${totalDuplicates}개 제외)` : ''}`;
       renderPreview();
       renderAction();
@@ -298,7 +294,7 @@ function renderAction() {
     </button>`;
 }
 
-// ★ 메인 처리: 5개씩 3초 간격
+// ★ 2개씩 2초 간격 처리
 async function startProcessing(retryOnly) {
   if (!apiKey) { showError('먼저 API 키를 저장해주세요!'); return; }
   if (running) return;
@@ -321,10 +317,8 @@ async function startProcessing(retryOnly) {
   if (runBtn) runBtn.disabled = true;
   if (retryBtn) retryBtn.disabled = true;
 
-  const BATCH = 5;
-
-  for (let i = 0; i < targets.length; i += BATCH) {
-    const chunk = targets.slice(i, i + BATCH);
+  for (let i = 0; i < targets.length; i += 2) {
+    const chunk = targets.slice(i, i + 2);
     const settled = await Promise.allSettled(chunk.map(p => processProduct(p.title)));
 
     settled.forEach((r, j) => {
@@ -346,9 +340,9 @@ async function startProcessing(retryOnly) {
       }
     });
 
-    if (!retryOnly) updateProgress(Math.min(i + BATCH, targets.length), targets.length);
+    if (!retryOnly) updateProgress(Math.min(i + 2, targets.length), targets.length);
     renderResults();
-    if (i + BATCH < targets.length) await new Promise(r => setTimeout(r, 3000));
+    if (i + 2 < targets.length) await new Promise(r => setTimeout(r, 2000));
   }
 
   running = false;
@@ -491,11 +485,9 @@ function toggleMod(v) { onlyMod = v; renderResults(); }
 function downloadCSV() {
   const byHandle = {};
   results.forEach(r => { byHandle[r.handle] = r; });
-
   const ti = headers.indexOf('Title');
   const yi = headers.indexOf('Type');
   const bi = headers.indexOf('Body (HTML)');
-
   const seenHandles = new Set();
   const updatedRows = [];
 
@@ -504,26 +496,21 @@ function downloadCSV() {
     if (!handle) { updatedRows.push(row); return; }
     if (seenHandles.has(handle)) return;
     seenHandles.add(handle);
-
     const r = byHandle[handle];
     if (!r) { updatedRows.push(row); return; }
-
     const nr = [...row];
     nr[ti] = r.titleEn;
     nr[yi] = r.newType;
-
     if (bi >= 0 && r.description) {
       const descHtml = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-left:4px solid #FF5C2B;border-radius:0 8px 8px 0;margin-top:20px;">${r.description}</div>`;
       nr[bi] = (nr[bi] || '') + descHtml;
     }
-
     updatedRows.push(nr);
   });
 
   const csv = [headers, ...updatedRows]
     .map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(','))
     .join('\n');
-
   const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
