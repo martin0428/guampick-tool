@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GuamPick — Reclassify + Translate + Describe</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@700;800&family=DM+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js"></script>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #F5F4F0; --surface: #FFFFFF; --surface2: #EFEDE8;
+    --text: #111110; --text2: #6B6A66; --text3: #A8A79F;
+    --accent: #FF5C2B; --border: rgba(0,0,0,0.08); --border2: rgba(0,0,0,0.14);
+    --success: #1A7F4B; --success-bg: #E8F5EE;
+    --danger: #C0392B; --danger-bg: #FDECEA;
+    --radius: 12px; --radius-lg: 20px;
+  }
+  body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 32px 16px 80px; }
+  .container { max-width: 1000px; margin: 0 auto; }
+  .header { margin-bottom: 32px; }
+  .logo-row { display: flex; align-items: baseline; gap: 12px; margin-bottom: 6px; }
+  .logo { font-family: 'Syne', sans-serif; font-size: 28px; font-weight: 800; letter-spacing: 0.08em; }
+  .logo span { color: var(--accent); }
+  .tag { font-size: 11px; font-weight: 600; background: var(--text); color: #fff; padding: 4px 12px; border-radius: 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+  .subtitle { font-size: 14px; color: var(--text2); }
+  .api-section { background: var(--surface); border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 16px; border: 1px solid var(--border); }
+  .api-label { font-size: 13px; font-weight: 600; margin-bottom: 8px; display: flex; align-items: center; gap: 8px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
+  .api-input-row { display: flex; gap: 8px; }
+  .api-input { flex: 1; padding: 10px 14px; border: 1px solid var(--border2); border-radius: var(--radius); font-size: 14px; font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); outline: none; }
+  .api-input:focus { border-color: var(--accent); }
+  .btn-dark { padding: 10px 20px; background: var(--text); color: #fff; border: none; border-radius: var(--radius); font-size: 13px; font-weight: 600; cursor: pointer; font-family: 'DM Sans', sans-serif; white-space: nowrap; }
+  .btn-dark:hover { background: #333; }
+  .api-hint { font-size: 11px; color: var(--text3); margin-top: 8px; }
+  .api-hint a { color: var(--accent); text-decoration: none; }
+  .api-status { font-size: 12px; margin-top: 6px; }
+  .api-status.ok { color: var(--success); }
+  .api-status.err { color: var(--danger); }
+  .dropzone { border: 2px dashed var(--border2); border-radius: var(--radius-lg); padding: 40px 24px; background: var(--surface); cursor: pointer; text-align: center; margin-bottom: 12px; transition: all 0.2s; }
+  .dropzone:hover, .dropzone.drag-over { border-color: var(--accent); background: #FFF8F5; }
+  .drop-icon { font-size: 32px; color: var(--text3); margin-bottom: 10px; }
+  .drop-text { font-size: 15px; font-weight: 600; color: var(--text2); margin-bottom: 10px; }
+  .drop-badges { display: flex; gap: 6px; justify-content: center; }
+  .badge { font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 6px; background: var(--surface2); color: var(--text2); }
+  .badge.zip { background: #FFF0E8; color: var(--accent); }
+  .file-loaded { display: flex; align-items: center; gap: 16px; justify-content: center; }
+  .file-name { font-size: 16px; font-weight: 600; }
+  .file-count { font-size: 13px; color: var(--accent); font-weight: 600; margin-top: 3px; }
+  .error-box { background: var(--danger-bg); color: var(--danger); padding: 12px 16px; border-radius: var(--radius); font-size: 13px; margin-bottom: 12px; }
+  .preview-grid { display: flex; background: var(--surface); border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 12px; border: 1px solid var(--border); }
+  .preview-item { flex: 1; text-align: center; }
+  .preview-divider { width: 1px; background: var(--border); align-self: stretch; }
+  .preview-num { display: block; font-family: 'Syne', sans-serif; font-size: 32px; font-weight: 800; }
+  .preview-label { font-size: 11px; color: var(--text3); display: block; margin-top: 4px; white-space: pre-line; line-height: 1.4; }
+  .info-box { background: var(--surface); border-radius: var(--radius); padding: 16px; margin-bottom: 12px; border: 1px solid var(--border); display: flex; flex-direction: column; gap: 10px; }
+  .info-row { display: flex; gap: 10px; font-size: 13px; color: var(--text2); align-items: flex-start; }
+  .run-btn { width: 100%; padding: 16px 24px; background: var(--accent); color: #fff; border: none; border-radius: var(--radius-lg); font-size: 16px; font-weight: 700; cursor: pointer; margin-bottom: 12px; font-family: 'Syne', sans-serif; transition: background 0.2s; }
+  .run-btn:hover:not(:disabled) { background: #E84A1C; }
+  .run-btn:disabled { background: #ccc; cursor: not-allowed; }
+  .progress-row { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; }
+  .progress-track { flex: 1; height: 6px; background: var(--surface2); border-radius: 10px; overflow: hidden; }
+  .progress-bar { height: 100%; background: var(--accent); border-radius: 10px; transition: width 0.4s ease; }
+  .progress-pct { font-size: 13px; font-weight: 700; color: var(--accent); min-width: 40px; }
+  .summary-card { background: var(--surface); border-radius: var(--radius-lg); padding: 20px 24px; margin-bottom: 16px; border: 1px solid var(--border); }
+  .summary-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; }
+  .summary-title { font-family: 'Syne', sans-serif; font-size: 18px; font-weight: 800; }
+  .chips { display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap; }
+  .chip { font-size: 11px; font-weight: 600; padding: 4px 12px; border-radius: 20px; }
+  .chip-orange { background: #FFF0E8; color: var(--accent); }
+  .chip-blue { background: #E8F0FF; color: #2563EB; }
+  .chip-red { background: var(--danger-bg); color: var(--danger); }
+  .cat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
+  .cat-card { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: background 0.15s; }
+  .cat-card:hover { background: var(--surface2); }
+  .cat-card.active { background: #FFF5F2; border-color: var(--accent); }
+  .cat-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .cat-name { font-size: 11px; font-weight: 600; }
+  .cat-cnt { font-size: 10px; color: var(--text3); }
+  .controls { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+  .tabs { display: flex; gap: 6px; }
+  .tab-btn { padding: 8px 18px; font-size: 13px; font-weight: 600; border: 1.5px solid var(--border2); border-radius: var(--radius); background: var(--surface); cursor: pointer; color: var(--text2); font-family: 'DM Sans', sans-serif; }
+  .tab-btn.active { border-color: var(--text); color: var(--text); }
+  .filter-row { display: flex; flex-wrap: wrap; gap: 5px; }
+  .filter-btn { font-size: 10px; padding: 5px 12px; border: 1.5px solid var(--border2); border-radius: 20px; background: var(--surface); cursor: pointer; color: var(--text2); font-weight: 600; font-family: 'DM Sans', sans-serif; }
+  .filter-btn.active { border-color: var(--accent); color: var(--accent); background: #FFF5F2; }
+  .toggle-label { font-size: 12px; color: var(--text2); cursor: pointer; display: flex; align-items: center; gap: 6px; }
+  .table-wrap { background: var(--surface); border-radius: var(--radius-lg); overflow: auto; margin-bottom: 16px; border: 1px solid var(--border); }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 14px 16px; border-bottom: 2px solid var(--border); font-size: 10px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; white-space: nowrap; }
+  td { padding: 12px 16px; border-bottom: 1px solid var(--border); vertical-align: middle; }
+  tr:last-child td { border-bottom: none; }
+  tr.modified { background: #FFFDF5; }
+  .pill { font-size: 10px; font-weight: 700; color: #fff; padding: 3px 9px; border-radius: 20px; white-space: nowrap; display: inline-block; }
+  .type-old { font-size: 11px; color: var(--text3); background: var(--surface2); padding: 2px 8px; border-radius: 4px; }
+  .type-old.changed { color: var(--danger); background: var(--danger-bg); }
+  .check-mark { font-size: 11px; color: var(--success); margin-left: 5px; }
+  .conf-bar-wrap { display: flex; align-items: center; gap: 6px; }
+  .conf-track { width: 50px; height: 4px; background: var(--surface2); border-radius: 4px; overflow: hidden; }
+  .conf-fill { height: 100%; border-radius: 4px; }
+  .conf-num { font-size: 10px; color: var(--text3); }
+  .title-en { font-size: 13px; font-weight: 600; display: block; margin-bottom: 4px; }
+  .desc-text { font-size: 11px; color: var(--text2); line-height: 1.6; display: block; }
+  .import-guide { background: var(--success-bg); border: 1px solid rgba(26,127,75,0.2); border-radius: var(--radius); padding: 18px 20px; margin-bottom: 16px; }
+  .import-title { font-size: 14px; font-weight: 700; color: var(--success); margin-bottom: 10px; }
+  .import-steps { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 13px; color: var(--text2); margin-bottom: 8px; }
+  .step-num { background: var(--success); color: #fff; border-radius: 50%; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; font-weight: 700; flex-shrink: 0; }
+  .import-note { font-size: 11px; color: var(--text3); }
+</style>
+</head>
+<body>
+<div class="container">
+  <div class="header">
+    <div class="logo-row">
+      <span class="logo">GUAM<span>PICK</span></span>
+      <span class="tag">AI Product Tool</span>
+    </div>
+    <p class="subtitle">Shopify CSV/ZIP → AI 재분류 + 영문 번역 + 상세설명 자동 생성</p>
+  </div>
+
+  <div class="api-section">
+    <div class="api-label"><span class="dot"></span>Anthropic API Key</div>
+    <div class="api-input-row">
+      <input type="password" class="api-input" id="apiKeyInput" placeholder="sk-ant-api03-...">
+      <button class="btn-dark" onclick="saveApiKey()">저장</button>
+    </div>
+    <div class="api-hint">API 키가 없으시면 <a href="https://console.anthropic.com" target="_blank">console.anthropic.com</a>에서 발급받으세요.</div>
+    <div class="api-status" id="apiStatus"></div>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept=".csv,.zip" style="display:none">
+    <div id="dropContent">
+      <div class="drop-icon">↑</div>
+      <div class="drop-text">Shopify products CSV 또는 ZIP 클릭하거나 드래그</div>
+      <div class="drop-badges">
+        <span class="badge">.csv</span>
+        <span class="badge zip">.zip</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="errorBox" style="display:none" class="error-box"></div>
+  <div id="previewSection" style="display:none"></div>
+  <div id="actionSection" style="display:none"></div>
+  <div id="progressSection" style="display:none"></div>
+  <div id="failureWarning" style="display:none" class="error-box"></div>
+  <div id="resultsSection" style="display:none"></div>
+</div>
+
+<script>
+const CAT_COLORS = {
+  "Beauty > Skincare":"#E91E8C","Beauty > Hair Care":"#9B59B6","Beauty > Body Care":"#8E44AD",
+  "Beauty > Mask Packs":"#D4537E","Beauty > Sun Care":"#F39C12","Beauty > Perfume & Fragrance":"#C0392B",
+  "Korean Food > Kimchi":"#E74C3C","Korean Food > Fresh Produce":"#27AE60","Korean Food > Snacks & Chips":"#FF5C2B",
+  "Korean Food > Bread & Bakery":"#E67E22","Korean Food > Banchan (Side Dishes)":"#D35400",
+  "Korean Food > Sauces & Condiments":"#F39C12","Korean Food > Health & Supplements":"#16A085",
+  "Korean Food > Packaged Foods":"#E67E22","Fashion > Women's Clothing":"#E91E8C",
+  "Fashion > Men's Clothing":"#2980B9","Fashion > Kids Clothing":"#27AE60",
+  "Fashion > Swimwear & Beachwear":"#3498DB","Fashion > Shoes & Sandals":"#8E44AD",
+  "Fashion > Accessories":"#9B59B6","Sports & Outdoors > Exercise & Fitness":"#27AE60",
+  "Sports & Outdoors > Golf":"#1ABC9C","Sports & Outdoors > Swimming":"#3498DB",
+  "Sports & Outdoors > Outdoor & Camping":"#2ECC71","Home & Living > Household Supplies":"#2980B9",
+  "Home & Living > Kitchenware":"#1ABC9C","Home & Living > Home & Interior":"#3498DB",
+  "Baby & Kids > Baby Care":"#F06292","Baby & Kids > Toys & Games":"#FF9800",
+  "Stationery & Office":"#2C3E50","Automotive":"#7F8C8D","Flowers & Gifts":"#E91E8C",
+  "Pet Supplies":"#795548","$1 Bakery":"#FF5C2B","Other":"#BDC3C7"
+};
+
+let apiKey = localStorage.getItem('guampick_api_key') || '';
+let products = [], results = [], headers = [], rawRows = [];
+let running = false, done = false;
+let filter = '전체', onlyMod = false, tab = 'type';
+
+if (apiKey) {
+  document.getElementById('apiKeyInput').value = apiKey;
+  document.getElementById('apiStatus').textContent = '✓ API 키 저장됨';
+  document.getElementById('apiStatus').className = 'api-status ok';
+}
+
+function saveApiKey() {
+  const val = document.getElementById('apiKeyInput').value.trim();
+  if (!val.startsWith('sk-ant')) {
+    document.getElementById('apiStatus').textContent = '⚠ 올바른 API 키 형식이 아닙니다';
+    document.getElementById('apiStatus').className = 'api-status err';
+    return;
+  }
+  apiKey = val;
+  localStorage.setItem('guampick_api_key', apiKey);
+  document.getElementById('apiStatus').textContent = '✓ 저장됨! 이제 파일을 올려주세요.';
+  document.getElementById('apiStatus').className = 'api-status ok';
+}
+
+const dz = document.getElementById('dropzone');
+dz.addEventListener('dragover', e => { e.preventDefault(); dz.classList.add('drag-over'); });
+dz.addEventListener('dragleave', () => dz.classList.remove('drag-over'));
+dz.addEventListener('drop', e => { e.preventDefault(); dz.classList.remove('drag-over'); const f = e.dataTransfer.files[0]; if (f) parseFile(f); });
+dz.addEventListener('click', () => document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change', e => { const f = e.target.files[0]; if (f) parseFile(f); });
+
+async function parseFile(file) {
+  showError('');
+  products = []; results = []; done = false;
+  document.getElementById('dropContent').innerHTML = `
+    <div class="file-loaded">
+      <span style="font-size:36px">${file.name.endsWith('.zip') ? '🗜️' : '📄'}</span>
+      <div>
+        <div class="file-name">${file.name}</div>
+        <div class="file-count">분석 중...</div>
+      </div>
+    </div>`;
+
+  let csvText = '';
+  if (file.name.toLowerCase().endsWith('.zip')) {
+    const buf = await file.arrayBuffer();
+    const zip = await JSZip.loadAsync(buf);
+    const csvPath = Object.keys(zip.files).find(n => n.toLowerCase().endsWith('.csv'));
+    if (!csvPath) { showError('ZIP 안에 CSV 파일이 없어요'); return; }
+    csvText = await zip.files[csvPath].async('string');
+  } else {
+    csvText = await file.text();
+  }
+
+  Papa.parse(csvText, {
+    complete: ({ data: rows }) => {
+      headers = rows[0];
+      rawRows = rows.slice(1);
+      const ti = headers.indexOf('Title'), yi = headers.indexOf('Type');
+      const ii = headers.indexOf('Image Src'), hi = headers.indexOf('Handle');
+      const seen = new Set();
+      products = [];
+      rows.slice(1).forEach(r => {
+        const h = r[hi];
+        if (h && !seen.has(h)) { seen.add(h); products.push({ handle: h, title: r[ti] || '', image: r[ii] || '', originalType: r[yi] || '' }); }
+      });
+      document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨`;
+      renderPreview();
+      renderAction();
+    },
+    error: e => showError('파싱 오류: ' + e.message)
+  });
+}
+
+function renderPreview() {
+  const skincare = products.filter(p => p.originalType === 'life' || p.originalType === '').length;
+  const hasImg = products.filter(p => p.image).length;
+  document.getElementById('previewSection').style.display = '';
+  document.getElementById('previewSection').innerHTML = `
+    <div class="preview-grid">
+      <div class="preview-item"><span class="preview-num" style="color:var(--text)">${products.length}</span><span class="preview-label">총 상품</span></div>
+      <div class="preview-divider"></div>
+      <div class="preview-item"><span class="preview-num" style="color:var(--danger)">${skincare}</span><span class="preview-label">오분류 의심\n(life 타입)</span></div>
+      <div class="preview-divider"></div>
+      <div class="preview-item"><span class="preview-num" style="color:#27AE60">${hasImg}</span><span class="preview-label">이미지 있음</span></div>
+    </div>
+    <div class="info-box">
+      <div class="info-row"><span>🔄</span><div><strong>Type 재분류</strong> — 35개 카테고리로 정확하게 분류</div></div>
+      <div class="info-row"><span>🌐</span><div><strong>영문 번역</strong> — 브랜드명 유지, 자연스러운 영문으로</div></div>
+      <div class="info-row"><span>📝</span><div><strong>영문 상세설명 생성</strong> — 2-3문장, 기존 상세페이지 맨 위에 추가</div></div>
+    </div>`;
+}
+
+function renderAction() {
+  document.getElementById('actionSection').style.display = '';
+  document.getElementById('actionSection').innerHTML = `
+    <button class="run-btn" id="runBtn" onclick="startProcessing()">
+      🤖 재분류 + 번역 + 설명 시작 (${products.length}개)
+    </button>`;
+}
+
+async function startProcessing() {
+  if (!apiKey) { showError('먼저 API 키를 저장해주세요!'); return; }
+  if (running) return;
+  running = true; done = false; results = [];
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('progressSection').style.display = '';
+  document.getElementById('resultsSection').style.display = '';
+  document.getElementById('failureWarning').style.display = 'none';
+
+  for (let i = 0; i < products.length; i += 6) {
+    const chunk = products.slice(i, i + 6);
+    const settled = await Promise.allSettled(chunk.map(p => processProduct(p.title)));
+    settled.forEach((r, j) => {
+      const p = chunk[j];
+      if (r.status === 'fulfilled') {
+        results.push({ ...p, newType: r.value.type || p.originalType, titleEn: r.value.title_en || p.title, description: r.value.description || '', confidence: r.value.confidence || 0 });
+      } else {
+        results.push({ ...p, newType: p.originalType, titleEn: p.title, description: '', confidence: 0, error: true });
+      }
+    });
+    updateProgress(Math.min(i + 6, products.length));
+    renderResults();
+    await new Promise(r => setTimeout(r, 300));
+  }
+  running = false; done = true;
+  renderResults();
+}
+
+async function processProduct(title) {
+  const res = await fetch('/api/process', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, apiKey })
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data;
+}
+
+function updateProgress(current) {
+  const pct = Math.round((current / products.length) * 100);
+  document.getElementById('progressSection').innerHTML = `
+    <div class="progress-row">
+      <div class="progress-track"><div class="progress-bar" style="width:${pct}%"></div></div>
+      <span class="progress-pct">${pct}%</span>
+    </div>`;
+}
+
+function renderResults() {
+  const typeCounts = results.reduce((a, r) => ({ ...a, [r.newType]: (a[r.newType] || 0) + 1 }), {});
+  const typeChanged = results.filter(r => r.newType !== r.originalType).length;
+  const descAdded = results.filter(r => r.description).length;
+  const errors = results.filter(r => r.error).length;
+
+  if (errors > 0) {
+    document.getElementById('failureWarning').style.display = '';
+    document.getElementById('failureWarning').textContent = `⚠ ${errors}개 처리 실패 — API 키를 확인해주세요`;
+  }
+
+  const displayed = results
+    .filter(r => filter === '전체' || r.newType === filter)
+    .filter(r => !onlyMod || r.newType !== r.originalType || (r.titleEn && r.titleEn !== r.title));
+
+  const typeKeys = ['전체', ...Object.keys(typeCounts).sort()];
+
+  document.getElementById('resultsSection').style.display = '';
+  document.getElementById('resultsSection').innerHTML = `
+    <div class="summary-card">
+      <div class="summary-header">
+        <div>
+          <div class="summary-title">${done ? '완료' : `처리 중... ${results.length}/${products.length}`}</div>
+          ${done ? `<div class="chips">
+            <span class="chip chip-orange">Type ${typeChanged}개 변경</span>
+            <span class="chip chip-blue">설명 ${descAdded}개 생성</span>
+            ${errors > 0 ? `<span class="chip chip-red">실패 ${errors}개</span>` : ''}
+          </div>` : ''}
+        </div>
+        ${done ? `<button class="btn-dark" onclick="downloadCSV()">⬇ CSV 다운로드</button>` : ''}
+      </div>
+      <div class="cat-grid">
+        ${Object.entries(typeCounts).sort((a, b) => b[1] - a[1]).map(([type, cnt]) => `
+          <div class="cat-card ${filter === type ? 'active' : ''}" onclick="setFilter('${type.replace(/'/g, "\\'")}')">
+            <div class="cat-dot" style="background:${CAT_COLORS[type] || '#999'}"></div>
+            <div><div class="cat-name">${type}</div><div class="cat-cnt">${cnt}개</div></div>
+          </div>`).join('')}
+      </div>
+    </div>
+
+    <div class="controls">
+      <div class="tabs">
+        <button class="tab-btn ${tab === 'type' ? 'active' : ''}" onclick="setTab('type')">카테고리 보기</button>
+        <button class="tab-btn ${tab === 'title' ? 'active' : ''}" onclick="setTab('title')">번역 + 설명 보기</button>
+      </div>
+      <div class="filter-row">
+        ${typeKeys.map(k => `<button class="filter-btn ${filter === k ? 'active' : ''}" onclick="setFilter('${k.replace(/'/g, "\\'")}'">${k} (${k === '전체' ? results.length : typeCounts[k] || 0})</button>`).join('')}
+      </div>
+      <label class="toggle-label">
+        <input type="checkbox" ${onlyMod ? 'checked' : ''} onchange="toggleMod(this.checked)"> 수정된 항목만
+      </label>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr>
+          <th>#</th>
+          <th>상품명</th>
+          ${tab === 'type' ? `<th>기존 Type</th><th>→ 새 Type</th>` : `<th>→ 영문 제목 + 설명</th>`}
+          <th>신뢰도</th>
+        </tr></thead>
+        <tbody>
+          ${displayed.map((r, i) => {
+            const tc = r.newType !== r.originalType;
+            const conf = Math.round((r.confidence || 0) * 100);
+            const confColor = r.confidence > 0.85 ? '#27AE60' : r.confidence > 0.6 ? '#F39C12' : '#E74C3C';
+            return `<tr class="${tc ? 'modified' : ''}">
+              <td style="color:var(--text3);font-size:11px;">${i + 1}</td>
+              <td style="max-width:200px;"><span style="font-size:12px;color:var(--text2);">${r.title}</span>${r.error ? '<span style="font-size:10px;color:var(--danger);display:block;">실패</span>' : ''}</td>
+              ${tab === 'type' ? `
+                <td><span class="type-old ${tc ? 'changed' : ''}">${r.originalType || '—'}</span></td>
+                <td><span class="pill" style="background:${CAT_COLORS[r.newType] || '#999'}">${r.newType}</span>${tc ? '<span class="check-mark">✓</span>' : ''}</td>` :
+              `<td style="max-width:360px;">
+                <span class="title-en">${r.titleEn || '—'}</span>
+                <span class="desc-text">${r.description || '—'}</span>
+              </td>`}
+              <td>
+                <div class="conf-bar-wrap">
+                  <div class="conf-track"><div class="conf-fill" style="width:${conf}%;background:${confColor}"></div></div>
+                  <span class="conf-num">${conf}%</span>
+                </div>
+              </td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    ${done ? `<div class="import-guide">
+      <div class="import-title">📥 Shopify 재임포트 방법</div>
+      <div class="import-steps">
+        <span class="step-num">1</span> Shopify Admin → Products → Import
+        <span class="step-num">2</span> CSV 파일 업로드
+        <span class="step-num">3</span> "Overwrite existing products" 체크
+        <span class="step-num">4</span> Import 완료
+      </div>
+      <div class="import-note">Handle 기준 매칭 → Title + Type + 상세설명 업데이트, 가격/재고/이미지 유지</div>
+    </div>` : ''}`;
+}
+
+function setFilter(f) { filter = f; renderResults(); }
+function setTab(t) { tab = t; renderResults(); }
+function toggleMod(v) { onlyMod = v; renderResults(); }
+
+function downloadCSV() {
+  const byHandle = {};
+  results.forEach(r => { byHandle[r.handle] = r; });
+  const ti = headers.indexOf('Title'), yi = headers.indexOf('Type'), bi = headers.indexOf('Body (HTML)');
+  const updated = rawRows.map(row => {
+    const r = byHandle[row[0]];
+    if (!r) return row;
+    const nr = [...row];
+    nr[ti] = r.titleEn;
+    nr[yi] = r.newType;
+    if (bi >= 0 && r.description) {
+      const dh = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-radius:8px;margin-bottom:20px;">${r.description}</div>`;
+      nr[bi] = dh + (nr[bi] || '');
+    }
+    return nr;
+  });
+  const csv = [headers, ...updated].map(row => row.map(c => `"${String(c ?? '').replace(/"/g, '""')}"`).join(',')).join('\n');
+  const blob = new Blob(['\uFEFF' + csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a'); a.href = url; a.download = 'guampick_updated.csv'; a.click(); URL.revokeObjectURL(url);
+}
+
+function showError(msg) {
+  const el = document.getElementById('errorBox');
+  if (msg) { el.textContent = '⚠ ' + msg; el.style.display = ''; }
+  else { el.style.display = 'none'; }
+}
+</script>
+</body>
+</html>
