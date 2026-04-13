@@ -278,8 +278,8 @@ async function startProcessing() {
   document.getElementById('resultsSection').style.display = '';
   document.getElementById('failureWarning').style.display = 'none';
 
-  for (let i = 0; i < products.length; i += 6) {
-    const chunk = products.slice(i, i + 6);
+  for (let i = 0; i < products.length; i += 3) {
+    const chunk = products.slice(i, i + 3);
     const settled = await Promise.allSettled(chunk.map(p => processProduct(p.title)));
     settled.forEach((r, j) => {
       const p = chunk[j];
@@ -291,7 +291,7 @@ async function startProcessing() {
     });
     updateProgress(Math.min(i + 6, products.length));
     renderResults();
-    await new Promise(r => setTimeout(r, 300));
+    await new Promise(r => setTimeout(r, 1000));
   }
   running = false; done = true;
   renderResults();
