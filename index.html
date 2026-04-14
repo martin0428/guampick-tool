@@ -75,6 +75,7 @@
   .chip-blue { background: #E8F0FF; color: #2563EB; }
   .chip-red { background: var(--danger-bg); color: var(--danger); }
   .chip-green { background: var(--success-bg); color: var(--success); }
+  .chip-brand { background: #F3E8FF; color: #7C3AED; }
   .cat-grid { display: flex; flex-wrap: wrap; gap: 6px; }
   .cat-card { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; transition: background 0.15s; }
   .cat-card:hover { background: var(--surface2); }
@@ -98,6 +99,7 @@
   tr.modified { background: #FFFDF5; }
   tr.failed { background: var(--danger-bg); }
   .pill { font-size: 10px; font-weight: 700; color: #fff; padding: 3px 9px; border-radius: 20px; white-space: nowrap; display: inline-block; }
+  .pill-brand { font-size: 10px; font-weight: 700; color: #7C3AED; background: #F3E8FF; padding: 3px 9px; border-radius: 20px; white-space: nowrap; display: inline-block; margin-left: 4px; }
   .type-old { font-size: 11px; color: var(--text3); background: var(--surface2); padding: 2px 8px; border-radius: 4px; }
   .type-old.changed { color: var(--danger); background: var(--danger-bg); }
   .check-mark { font-size: 11px; color: var(--success); margin-left: 5px; }
@@ -121,7 +123,7 @@
       <span class="logo">GUAM<span>PICK</span></span>
       <span class="tag">AI Product Tool</span>
     </div>
-    <p class="subtitle">Shopify CSV/ZIP → AI 재분류 + 영문 번역 + 상세설명 자동 생성</p>
+    <p class="subtitle">Shopify CSV/ZIP → AI 재분류 + 영문 번역 + 상세설명 자동 생성 + 브랜드 태그</p>
   </div>
 
   <div class="api-section">
@@ -172,6 +174,19 @@ const CAT_COLORS = {
   "Stationery & Office":"#2C3E50","Automotive":"#7F8C8D","Flowers & Gifts":"#E91E8C",
   "Pet Supplies":"#795548","$1 Bakery":"#FF5C2B","Other":"#BDC3C7"
 };
+
+// ★ 브랜드 감지 규칙 (index.html 클라이언트 사이드)
+const BRAND_RULES = [
+  { keywords: ['bibigo', 'bi bi go'], tag: 'Bibigo' },
+  { keywords: ['black & white', 'black and white', 'black&white'], tag: 'Black and White Chef' },
+];
+
+function detectBrands(title) {
+  const lower = (title || '').toLowerCase();
+  return BRAND_RULES
+    .filter(rule => rule.keywords.some(kw => lower.includes(kw)))
+    .map(rule => rule.tag);
+}
 
 let apiKey = localStorage.getItem('guampick_api_key') || '';
 let products = [], results = [], headers = [], rawRows = [];
@@ -250,7 +265,7 @@ async function parseFile(file) {
           totalDuplicates++;
         }
       });
-      document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨${totalDuplicates > 0 ? ` (중복 행 ${totalDuplicates}개 제외)` : ''}`;
+      document.querySelector('.file-count').textContent = `${products.length}개 상품 로딩됨 (variant 포함 총 ${rawRows.length}행)`;
       renderPreview();
       renderAction();
     },
@@ -266,7 +281,7 @@ function renderPreview() {
     <div class="preview-grid">
       <div class="preview-item">
         <span class="preview-num" style="color:var(--text)">${products.length}</span>
-        <span class="preview-label">총 상품${totalDuplicates > 0 ? `\n(중복 ${totalDuplicates}행 제거됨)` : ''}</span>
+        <span class="preview-label">총 상품\n(variant 행 별도 유지)</span>
       </div>
       <div class="preview-divider"></div>
       <div class="preview-item">
@@ -283,6 +298,7 @@ function renderPreview() {
       <div class="info-row"><span>🔄</span><div><strong>Type 재분류</strong> — 35개 카테고리로 정확하게 분류</div></div>
       <div class="info-row"><span>🌐</span><div><strong>영문 번역</strong> — 브랜드명 유지, 자연스러운 영문으로</div></div>
       <div class="info-row"><span>📝</span><div><strong>영문 상세설명 생성</strong> — 2-3문장, 한글 상세페이지 아래에 추가</div></div>
+      <div class="info-row"><span>🏷️</span><div><strong>브랜드 태그 자동 추가</strong> — Bibigo / Black and White Chef 감지 → 컬렉션 자동 편입</div></div>
     </div>`;
 }
 
@@ -294,7 +310,6 @@ function renderAction() {
     </button>`;
 }
 
-// ★ 2개씩 2초 간격 처리
 async function startProcessing(retryOnly) {
   if (!apiKey) { showError('먼저 API 키를 저장해주세요!'); return; }
   if (running) return;
@@ -323,12 +338,19 @@ async function startProcessing(retryOnly) {
 
     settled.forEach((r, j) => {
       const p = chunk[j];
+
+      // ★ 브랜드 태그: API 응답 + 클라이언트 감지 병합
+      const apiBrandTags = (r.status === 'fulfilled' && r.value.brandTags) ? r.value.brandTags : [];
+      const clientBrandTags = detectBrands(p.title + ' ' + (r.status === 'fulfilled' ? (r.value.title_en || '') : ''));
+      const brandTags = [...new Set([...apiBrandTags, ...clientBrandTags])];
+
       const result = {
         ...p,
         newType: r.status === 'fulfilled' ? (r.value.type || p.originalType) : p.originalType,
         titleEn: r.status === 'fulfilled' ? (r.value.title_en || p.title) : p.title,
         description: r.status === 'fulfilled' ? (r.value.description || '') : '',
         confidence: r.status === 'fulfilled' ? (r.value.confidence || 0) : 0,
+        brandTags,
         error: r.status === 'rejected'
       };
 
@@ -375,6 +397,7 @@ function renderResults() {
   const typeChanged = results.filter(r => r.newType !== r.originalType).length;
   const descAdded = results.filter(r => r.description).length;
   const errors = results.filter(r => r.error).length;
+  const brandTagged = results.filter(r => r.brandTags && r.brandTags.length > 0).length;
 
   if (errors > 0 && done) {
     document.getElementById('failureWarning').style.display = '';
@@ -397,6 +420,7 @@ function renderResults() {
           ${done ? `<div class="chips">
             <span class="chip chip-orange">Type ${typeChanged}개 변경</span>
             <span class="chip chip-blue">설명 ${descAdded}개 생성</span>
+            ${brandTagged > 0 ? `<span class="chip chip-brand">브랜드 태그 ${brandTagged}개</span>` : ''}
             ${errors > 0 ? `<span class="chip chip-red">실패 ${errors}개</span>` : '<span class="chip chip-green">실패 없음 ✓</span>'}
           </div>` : ''}
         </div>
@@ -434,6 +458,7 @@ function renderResults() {
           <th>#</th>
           <th>상품명</th>
           ${tab === 'type' ? `<th>기존 Type</th><th>→ 새 Type</th>` : `<th>→ 영문 제목 + 설명</th>`}
+          <th>브랜드</th>
           <th>신뢰도</th>
         </tr></thead>
         <tbody>
@@ -441,6 +466,9 @@ function renderResults() {
             const tc = r.newType !== r.originalType;
             const conf = Math.round((r.confidence || 0) * 100);
             const confColor = r.confidence > 0.85 ? '#27AE60' : r.confidence > 0.6 ? '#F39C12' : '#E74C3C';
+            const brandHtml = (r.brandTags && r.brandTags.length > 0)
+              ? r.brandTags.map(t => `<span class="pill-brand">${t}</span>`).join('')
+              : '<span style="font-size:10px;color:var(--text3)">—</span>';
             return `<tr class="${r.error ? 'failed' : tc ? 'modified' : ''}">
               <td style="color:var(--text3);font-size:11px;">${i + 1}</td>
               <td style="max-width:200px;">
@@ -454,6 +482,7 @@ function renderResults() {
                 <span class="title-en">${r.titleEn || '—'}</span>
                 <span class="desc-text">${r.description || '—'}</span>
               </td>`}
+              <td>${brandHtml}</td>
               <td>
                 <div class="conf-bar-wrap">
                   <div class="conf-track"><div class="conf-fill" style="width:${conf}%;background:${confColor}"></div></div>
@@ -474,7 +503,7 @@ function renderResults() {
         <span class="step-num">3</span> "Overwrite existing products" 체크
         <span class="step-num">4</span> Import 완료
       </div>
-      <div class="import-note">Handle 기준 매칭 → Title + Type + 상세설명 업데이트, 가격/재고/이미지 유지</div>
+      <div class="import-note">Handle 기준 매칭 → Title + Type + 상세설명 + 브랜드 태그 업데이트 / 재고·가격·이미지는 원본 유지</div>
     </div>` : ''}`;
 }
 
@@ -482,29 +511,59 @@ function setFilter(f) { filter = f; renderResults(); }
 function setTab(t) { tab = t; renderResults(); }
 function toggleMod(v) { onlyMod = v; renderResults(); }
 
+// ★ 핵심 수정: variant 행 유지 + Tags 브랜드 추가
 function downloadCSV() {
   const byHandle = {};
   results.forEach(r => { byHandle[r.handle] = r; });
+
   const ti = headers.indexOf('Title');
   const yi = headers.indexOf('Type');
   const bi = headers.indexOf('Body (HTML)');
-  const seenHandles = new Set();
+  const tagi = headers.indexOf('Tags');
+  const hi = headers.indexOf('Handle');
+
+  const processedHandles = new Set();
   const updatedRows = [];
 
   rawRows.forEach(row => {
-    const handle = row[headers.indexOf('Handle')];
-    if (!handle) { updatedRows.push(row); return; }
-    if (seenHandles.has(handle)) return;
-    seenHandles.add(handle);
-    const r = byHandle[handle];
-    if (!r) { updatedRows.push(row); return; }
+    const handle = row[hi];
     const nr = [...row];
-    nr[ti] = r.titleEn;
-    nr[yi] = r.newType;
-    if (bi >= 0 && r.description) {
-      const descHtml = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-left:4px solid #FF5C2B;border-radius:0 8px 8px 0;margin-top:20px;">${r.description}</div>`;
-      nr[bi] = (nr[bi] || '') + descHtml;
+
+    // variant 행 (Handle 없음) → 그대로 유지 (재고 포함)
+    if (!handle) {
+      updatedRows.push(nr);
+      return;
     }
+
+    const r = byHandle[handle];
+    if (!r) {
+      updatedRows.push(nr);
+      return;
+    }
+
+    if (!processedHandles.has(handle)) {
+      // ★ 첫 번째(메인) 행: Title, Type, Body HTML, Tags 업데이트
+      processedHandles.add(handle);
+      nr[ti] = r.titleEn;
+      nr[yi] = r.newType;
+
+      if (bi >= 0 && r.description) {
+        const descHtml = `<div style="font-family:sans-serif;font-size:15px;line-height:1.8;color:#333;padding:16px 20px;background:#f9f9f7;border-left:4px solid #FF5C2B;border-radius:0 8px 8px 0;margin-top:20px;">${r.description}</div>`;
+        nr[bi] = (nr[bi] || '') + descHtml;
+      }
+
+      // Tags: 기존 태그 유지 + 브랜드 태그 추가
+      if (tagi >= 0 && r.brandTags && r.brandTags.length > 0) {
+        const existingTags = nr[tagi] ? nr[tagi].split(',').map(t => t.trim()).filter(Boolean) : [];
+        const merged = [...new Set([...existingTags, ...r.brandTags])];
+        nr[tagi] = merged.join(', ');
+      }
+    } else {
+      // ★ 중복 Handle 행 (variant): Title, Type만 동일하게 업데이트, 재고 등 원본 유지
+      nr[ti] = r.titleEn;
+      nr[yi] = r.newType;
+    }
+
     updatedRows.push(nr);
   });
 
